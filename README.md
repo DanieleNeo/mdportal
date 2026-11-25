@@ -1,6 +1,6 @@
 # MD Portal — generatore Markdown → HTML
 
-Versione 4.2.1. Generatore generico in Python ispirato alla struttura del portale doc-pack: un unico HTML con pagine, indice ad albero, sommario per pagina, ricerca full-text, tema chiaro/scuro, stampa e copia del codice. Nessuna risorsa web necessaria per l'interfaccia.
+Versione 4.3. Generatore generico in Python ispirato alla struttura del portale doc-pack: un unico HTML con pagine, indice ad albero, sommario per pagina, ricerca full-text, tema chiaro/scuro, stampa e copia del codice. Nessuna risorsa web necessaria per l'interfaccia.
 
 ## Requisiti
 
@@ -243,3 +243,13 @@ Esempio Windows con Chrome/Edge già installato:
 py -m pip install -r requirements.txt
 py md_portal.py docs --title "Documentazione tecnica" -o documentazione.html --report report.json
 ```
+
+## Novità 4.3 — Navigazione e ricerca
+
+La barra laterale è organizzata in sezioni con rami espandibili, guide verticali, indicatori di stato e riga attiva. Un README/index di cartella può diventare il collegamento del ramo stesso; la freccia apre e chiude i figli indipendentemente dal collegamento. Il breadcrumb e precedente/successivo seguono l'ordine dell'indice. Le cartelle generiche mantengono la loro struttura; per monorepo con `apps/`, `doc/` o `docs/`, `_packages/`, `deploy/` vengono applicate convenzioni automatiche: Main, Ecosistema, Servizi, Deploy, Packages; i servizi sono raggruppati per prefisso AFC, CORE, ILM, NET, UI o Altri. Per i servizi con `doc/features/` o `docs/features/`, i gruppi sono Funzionalità (roadmap prima, ID in ordine naturale), Attori, API, Tecnica, Altro, Da collocare. Le sezioni vuote sono omesse. Non è richiesto un file di configurazione; gli H1/front matter determinano i titoli delle foglie. Le etichette e l'ordine non sono una replica di tutte le eccezioni editoriali del doc-pack originale.
+
+L'indice destro evidenzia la sezione corrente durante lo scroll, usando requestAnimationFrame e una soglia legata alla barra superiore. I livelli vengono indentati; il primo H1, se ci sono ulteriori sezioni, è escluso, mentre gli H1 successivi restano navigabili. La voce corrente viene mantenuta visibile nell'indice. L'URL non viene riscritto a ogni scroll.
+
+La ricerca costruisce l'indice al primo utilizzo. Ignora maiuscole e accenti, richiede tutti i termini, pondera titolo/percorso (30), intestazioni (8), frequenza nel testo (massimo 30 per termine) e frase esatta (15). Gli ID delle funzionalità e le user story presenti nelle intestazioni hanno priorità; sono ammessi anche ID abbreviati (es. `TKT-1`, `US-TKT-1-1`, `ticketing#TKT-1`). I primi 80 risultati mostrano un estratto evidenziato, e il conteggio totale rimane visibile. I risultati restano aperti durante la navigazione. Frecce su/giù, Invio, Esc, / e Ctrl+K sono supportati. Il testo nella pagina è evidenziato tramite CSS Custom Highlight API, quando disponibile nel browser; non vengono alterati formule, link o SVG. La ricerca rimane interamente offline e non aggiunge librerie JavaScript esterne. Nessun nuovo prerequisito.
+
+Verifica sulla struttura del documento doc-pack di riferimento: 554 voci (compresa la dashboard), tutte presenti una sola volta. Test di ricerca separato sui testi e metadati estratti dall'HTML originale: circa 3,84 MB di testo, 74,7 ms alla prima query (indicizzazione inclusa), circa 3–27 ms per le successive sei query nel browser di test, escluso il debounce di 120 ms. Non è un confronto cronometrico con doc-pack e non misura l'apertura di tutte le pagine originali. Test del portale generato eseguiti su Chromium Linux senza rete; apertura file:// bloccata da policy del laboratorio.
