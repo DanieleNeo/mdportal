@@ -1,0 +1,12 @@
+markdown-it-py>=3,<5
+beautifulsoup4>=4.12,<5
+Pygments>=2.17,<3
+PyYAML>=6,<7
+rjsmin>=1.2,<2
+rcssmin>=1.1,<2
+
+brotli>=1.1,<2
+zopfli>=0.2,<1
+zstandard>=0.23,<1
+
+playwright>=1.48,<2
