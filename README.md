@@ -1,6 +1,6 @@
 # MD Portal — generatore Markdown → HTML
 
-Versione 4.3.1. Generatore generico in Python ispirato alla struttura del portale doc-pack: un unico HTML con pagine, indice ad albero, sommario per pagina, ricerca full-text, tema chiaro/scuro, stampa e copia del codice. Nessuna risorsa web necessaria per l'interfaccia.
+Versione 4.3.2. Generatore generico in Python ispirato alla struttura del portale doc-pack: un unico HTML con pagine, indice ad albero, sommario per pagina, ricerca full-text, tema chiaro/scuro, stampa e copia del codice. Nessuna risorsa web necessaria per l'interfaccia.
 
 ## Requisiti
 
@@ -258,3 +258,9 @@ Verifica sulla struttura del documento doc-pack di riferimento: 554 voci (compre
 
 - Badge ID delle feature nel menu laterale: font monospaziato, sfondo e bordo per stato, contrasto in entrambi i temi.
 - Risoluzione dei riferimenti inline Dataview semplici (es. `=this.name`, `=this.description`, `=this.version`) dal front matter YAML della pagina, prima di calcolare titoli, ancore e indice di ricerca. I valori scalari sono inseriti come testo, non HTML o codice. Le proprietà mancanti o non scalari sono lasciate visibili con un avviso (errore in modalità `--strict`). Non è un interprete Dataview: query, funzioni ed espressioni complesse non vengono eseguite. I blocchi di codice restano invariati. Il report include `inline_properties_resolved`.
+
+## Aggiornamento 4.3.2
+
+Supporto alle ancore esplicite vuote `<a id="ref-d1"></a>` e `<a name="ref-d1"></a>` anche nelle celle delle tabelle. I collegamenti locali e tra documenti vengono risolti tramite il normale router del portale, senza aggiungere voci artificiali al sommario. L'HTML arbitrario resta disabilitato; gli esempi in codice non sono interpretati. Le ancore duplicate o mancanti vengono segnalate e `--strict` conserva il suo comportamento. Il report espone `explicit_anchors`. I riferimenti impliciti a file omonimi rimangono intenzionalmente ambigui: usare link espliciti con percorso relativo.
+
+Verifica sulla relazione ATCAS–NADGE v3.5.1: 34 ancore esplicite, 43 collegamenti interni verso 33 destinazioni distinte, 96 formule SVG, 46 allegati, zero avvisi in modalità strict. Test browser su Chromium con HTML caricato in memoria (navigazione file:// bloccata nell'ambiente di test).
