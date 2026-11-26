@@ -4,7 +4,7 @@ import argparse, base64, html, json, mimetypes, os, re, sys, unicodedata
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import quote, unquote, urlsplit
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, NavigableString
 import yaml
 from markdown_it import MarkdownIt
 from pygments import highlight
@@ -89,7 +89,26 @@ def read_metadata(source, path, warn):
             m=re.search(r'^\s*(?:[-*]\s+)?(?:\*\*Stato\*\*\s*:|\*\*Stato:\*\*|Stato:)\s*(.*?)\s*$',source,re.I|re.M)
             if m: result['status']=m[1].replace('*','').strip()
         raw=result['status']; result['status']=STATUS_ALIASES.get(raw.lower().replace('_',' ').replace('-',' '),raw or 'non specificato')
-    return source,result
+    return source,result,meta
+
+def resolve_inline_properties(soup, properties, warn):
+    """Resolve simple Dataview-style local YAML references, never evaluate code."""
+    resolved=0
+    for code in list(soup.find_all("code")):
+        if code.find_parent("pre"):
+            continue
+        match=re.fullmatch(r"=\s*this\.([\w-]+)",code.get_text().strip())
+        if not match:
+            continue
+        field=match[1].lower()
+        value=properties.get(field)
+        if field not in properties or value is None or not isinstance(value,(str,int,float,bool)):
+            warn(f"Unresolved inline property: {match[0]} (missing or non-scalar YAML field)")
+            continue
+        text=str(value).lower() if isinstance(value,bool) else str(value)
+        code.replace_with(NavigableString(text))
+        resolved+=1
+    return resolved
 
 def legacy_dependencies(soup,meta):
     if meta['type']!='feature': return
@@ -150,16 +169,17 @@ def main():
     paths={f:f.relative_to(root).as_posix() for f in files}
     md=MarkdownIt('commonmark',{'html':False}).enable(['table','strikethrough'])
     if not args.no_math: md.use(math_plugin)
-    warnings=[]; pages=[]; soups={}; headings_by_file={}; diagram_count=0; math_count=0
+    warnings=[]; pages=[]; soups={}; headings_by_file={}; diagram_count=0; math_count=0; property_count=0
     assets=Assets(root,IGNORE,EXTS,excluded=[Path(args.output).resolve()]+([args.report.resolve()] if args.report else []))
     attachments={}
     print(f'[1/4] Lettura Markdown: {len(files)} documenti; root: {root}')
     def warn(f,msg): warnings.append(f'{paths[f]}: {msg}')
     for f in files:
         source=f.read_text(encoding='utf-8-sig')
-        source,meta=read_metadata(source,paths[f],lambda msg:warn(f,msg))
+        source,meta,properties=read_metadata(source,paths[f],lambda msg:warn(f,msg))
         env={}
         soup=BeautifulSoup(md.render(source,env),'html.parser'); soups[f]=soup
+        property_count+=resolve_inline_properties(soup,properties,lambda msg:warn(f,msg))
         math_count+=env.get('math_count',0)
         legacy_dependencies(soup,meta)
         used=set(); headings=[]; aliases={}
@@ -306,13 +326,13 @@ def main():
         print(f"  Payload codificato ({chosen['encoding']}): {chosen['encoded_bytes']:,} byte")
         print(f"  Overhead contenitore (decoder incluso): {chosen['wrapper_overhead_bytes']:,} byte")
     else: print('  Payload: nessuna compressione/codifica')
-    manifest={'version':'4.3','render_mode':args.render_mode,'rendering':render_stats,'math_formulas':math_count,'math_renderer':'MathJax 3.2.1 SVG' if math_count else None,'selected_payload_bytes':chosen['payload_bytes'],'selected_encoded_bytes':chosen.get('encoded_bytes'),'selected_wrapper_overhead_bytes':chosen.get('wrapper_overhead_bytes'),'compression_profile':args.profile,'payload_encoding':chosen['encoding'],'selected_candidate':chosen,'compression_candidates':candidates,'documents':len(files),'warnings':warnings,'mermaid_diagrams':diagram_count,'features':len(features),'navigation_sections':len(navigation),'navigation_pages':len(nav_order),'raw_html_bytes':raw_size,'minified_html_bytes':min_size,'gzip_candidate_payload_bytes':gz_size,'gzip_payload_bytes':gz_size,'final_html_bytes':final_size,'compression':mode,'total_reduction_percent':round(100*(1-final_size/raw_size),4),'minifiers':engines,'component_sizes':stats,'asset_paths':len(assets.paths),'unique_asset_payloads':len(assets.entries),'original_asset_bytes':sum(assets.entries[v]['size'] for v in assets.paths.values()),'attachments':len(set().union(*attachments.values())),'assets':[{'path':p.relative_to(root).as_posix(),'id':v,'bytes':assets.entries[v]['size'],'sha256':assets.entries[v]['sha256'],'attachment':any(p in x for x in attachments.values())} for p,v in sorted(assets.paths.items())]}
+    manifest={'version':'4.3.1','inline_properties_resolved':property_count,'render_mode':args.render_mode,'rendering':render_stats,'math_formulas':math_count,'math_renderer':'MathJax 3.2.1 SVG' if math_count else None,'selected_payload_bytes':chosen['payload_bytes'],'selected_encoded_bytes':chosen.get('encoded_bytes'),'selected_wrapper_overhead_bytes':chosen.get('wrapper_overhead_bytes'),'compression_profile':args.profile,'payload_encoding':chosen['encoding'],'selected_candidate':chosen,'compression_candidates':candidates,'documents':len(files),'warnings':warnings,'mermaid_diagrams':diagram_count,'features':len(features),'navigation_sections':len(navigation),'navigation_pages':len(nav_order),'raw_html_bytes':raw_size,'minified_html_bytes':min_size,'gzip_candidate_payload_bytes':gz_size,'gzip_payload_bytes':gz_size,'final_html_bytes':final_size,'compression':mode,'total_reduction_percent':round(100*(1-final_size/raw_size),4),'minifiers':engines,'component_sizes':stats,'asset_paths':len(assets.paths),'unique_asset_payloads':len(assets.entries),'original_asset_bytes':sum(assets.entries[v]['size'] for v in assets.paths.values()),'attachments':len(set().union(*attachments.values())),'assets':[{'path':p.relative_to(root).as_posix(),'id':v,'bytes':assets.entries[v]['size'],'sha256':assets.entries[v]['sha256'],'attachment':any(p in x for x in attachments.values())} for p,v in sorted(assets.paths.items())]}
     if args.report:
         args.report.parent.mkdir(parents=True,exist_ok=True); args.report.write_text(json.dumps(manifest,ensure_ascii=False,indent=2),encoding='utf-8'); print('  Report:',args.report.resolve())
     print(f'OK: {out.resolve()} | {final_size:,} byte | {len(warnings)} avvisi')
 
 HTML=r'''<!doctype html>
-<html lang="it"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="generator" content="md-portal-python 4.3"><title>@@TITLE@@</title>
+<html lang="it"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="generator" content="md-portal-python 4.3.1"><title>@@TITLE@@</title>
 <script>try{document.documentElement.dataset.theme=localStorage.getItem('mdportal-theme')||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light')}catch(e){}</script>
 <style>
 :root{--bg:#fff;--side:#f7f8fa;--soft:#f1f4f7;--fg:#202833;--muted:#657184;--line:#dce2e9;--accent:#245cc6;--active:#e3edff;--width:300px;color-scheme:light}
@@ -326,7 +346,7 @@ HTML=r'''<!doctype html>
 .mermaid-static .diagram-dark{display:none}[data-theme="dark"] .mermaid-static .diagram-light{display:none}[data-theme="dark"] .mermaid-static .diagram-dark{display:inline-block}.math-static svg{fill:currentColor;stroke:currentColor;display:inline-block;vertical-align:middle}.math-static svg[style]{vertical-align:baseline}.math-static.math-display svg{vertical-align:middle}
 /* Structured navigation and scroll-aware contents */
 :root{--width:326px;--mark:#ffe6a0}:root[data-theme=dark]{--mark:#705a20}
-.search{position:relative;padding:10px 10px 8px}.search input{font-size:15px;padding:9px 32px 9px 12px}.search kbd{position:absolute;right:21px;top:21px;color:var(--muted);font-size:12px;border:1px solid var(--line);border-radius:4px;padding:0 5px;pointer-events:none}.search:focus-within kbd{display:none}.navscroll{padding:0 7px 18px}.navsection{margin:13px 0 19px}.navsection-title,.toc-title{display:block;text-transform:uppercase;letter-spacing:.065em;color:var(--muted);font-size:12px;font-weight:700;margin:0 9px 7px}.navsection ul{list-style:none;padding:0;margin:0}.navsection li>ul{display:none;border-left:1px solid var(--line);margin-left:11px;padding-left:11px}.navsection li.expanded>ul{display:block}.navrow{display:flex;align-items:flex-start;border-radius:7px;min-height:28px}.navrow:hover{background:var(--soft)}.navrow:has(>.active){background:var(--active)}.navtoggle{border:0;background:none;color:var(--muted);padding:0;flex:0 0 25px;width:25px;height:29px;font-size:24px;line-height:25px;text-align:center}.navtoggle:hover{background:none;color:var(--fg)}.expanded>.navrow>.navtoggle{transform:rotate(90deg)}.navrow .navlink{display:block;flex:1;min-width:0;font-size:15px;line-height:1.45;padding:4px 7px 4px 0;border:0;background:none;text-align:left;color:var(--fg);font-weight:400;cursor:pointer}.navrow .navlink.group{font-weight:650}.navrow .navlink.active{color:var(--accent);font-weight:650}.navfeature{font-size:11px;font-weight:650;display:inline-block;margin-right:6px;color:var(--state,var(--muted))}.toc{border:0;padding:0;font-size:13px}.toc-title{margin:0 0 10px}.toc .toclink{padding:4px 6px;border-left:2px solid var(--line);line-height:1.45;font-size:13px}.toc .toclink.active{color:var(--accent);border-left-color:var(--accent)}.toc .toclink:hover{text-decoration:none;color:var(--accent)}.main{grid-template-columns:minmax(0,1fr) 235px}.article{align-self:start;margin:0 auto}.result{border:0;border-radius:7px;margin:2px 0;padding:8px 10px}.result.sel{background:var(--active)}.result strong{color:var(--fg);font-size:14px}.result small{margin-top:2px;font-size:11px}.result span{margin-top:3px;font-size:13px}.result mark{background:var(--mark);color:inherit}::highlight(md-search){background:var(--mark);color:inherit}.results-head{padding:8px 10px;font-size:12px;color:var(--muted)}.crumb span{white-space:pre-wrap}.crumb a{color:var(--muted)}
+.search{position:relative;padding:10px 10px 8px}.search input{font-size:15px;padding:9px 32px 9px 12px}.search kbd{position:absolute;right:21px;top:21px;color:var(--muted);font-size:12px;border:1px solid var(--line);border-radius:4px;padding:0 5px;pointer-events:none}.search:focus-within kbd{display:none}.navscroll{padding:0 7px 18px}.navsection{margin:13px 0 19px}.navsection-title,.toc-title{display:block;text-transform:uppercase;letter-spacing:.065em;color:var(--muted);font-size:12px;font-weight:700;margin:0 9px 7px}.navsection ul{list-style:none;padding:0;margin:0}.navsection li>ul{display:none;border-left:1px solid var(--line);margin-left:11px;padding-left:11px}.navsection li.expanded>ul{display:block}.navrow{display:flex;align-items:flex-start;border-radius:7px;min-height:28px}.navrow:hover{background:var(--soft)}.navrow:has(>.active){background:var(--active)}.navtoggle{border:0;background:none;color:var(--muted);padding:0;flex:0 0 25px;width:25px;height:29px;font-size:24px;line-height:25px;text-align:center}.navtoggle:hover{background:none;color:var(--fg)}.expanded>.navrow>.navtoggle{transform:rotate(90deg)}.navrow .navlink{display:block;flex:1;min-width:0;font-size:15px;line-height:1.45;padding:4px 7px 4px 0;border:0;background:none;text-align:left;color:var(--fg);font-weight:400;cursor:pointer}.navrow .navlink.group{font-weight:650}.navrow .navlink.active{color:var(--accent);font-weight:650}.navfeature{display:inline-block;margin-right:6px;position:relative;top:-1px;padding:1px 6px;border-radius:5px;font:600 11px/1.45 ui-monospace,SFMono-Regular,Consolas,monospace;font-variant-numeric:tabular-nums;letter-spacing:.01em;white-space:nowrap;vertical-align:baseline;color:var(--badge-fg,var(--muted));background:var(--badge-bg,var(--soft));box-shadow:inset 0 0 0 1px var(--badge-border,var(--line))}.navfeature.todo{--badge-fg:#343a40;--badge-bg:#f1f3f5;--badge-border:#b9bfc5}.navfeature.doing{--badge-fg:#785000;--badge-bg:#fff3bf;--badge-border:#e2ae56}.navfeature.done{--badge-fg:#1b4332;--badge-bg:#d3f9d8;--badge-border:#85c591}.navfeature.blocked{--badge-fg:#8a1420;--badge-bg:#ffe3e3;--badge-border:#df9696}.navfeature.cancelled{--badge-fg:#6e3e91;--badge-bg:#f2e7fb;--badge-border:#c5a7da}[data-theme=dark] .navfeature.todo{--badge-fg:#dee2e6;--badge-bg:#303640;--badge-border:#647080}[data-theme=dark] .navfeature.doing{--badge-fg:#ffec99;--badge-bg:#49371f;--badge-border:#a87b38}[data-theme=dark] .navfeature.done{--badge-fg:#b2f2bb;--badge-bg:#203d2c;--badge-border:#558e62}[data-theme=dark] .navfeature.blocked{--badge-fg:#ffc9c9;--badge-bg:#482a30;--badge-border:#b75f67}[data-theme=dark] .navfeature.cancelled{--badge-fg:#dfc1f5;--badge-bg:#3c2c4c;--badge-border:#9873b4}.navfeature-code{font-weight:400;opacity:.78}.navlink.active .navfeature{box-shadow:inset 0 0 0 1.5px var(--state,var(--accent))}.toc{border:0;padding:0;font-size:13px}.toc-title{margin:0 0 10px}.toc .toclink{padding:4px 6px;border-left:2px solid var(--line);line-height:1.45;font-size:13px}.toc .toclink.active{color:var(--accent);border-left-color:var(--accent)}.toc .toclink:hover{text-decoration:none;color:var(--accent)}.main{grid-template-columns:minmax(0,1fr) 235px}.article{align-self:start;margin:0 auto}.result{border:0;border-radius:7px;margin:2px 0;padding:8px 10px}.result.sel{background:var(--active)}.result strong{color:var(--fg);font-size:14px}.result small{margin-top:2px;font-size:11px}.result span{margin-top:3px;font-size:13px}.result mark{background:var(--mark);color:inherit}::highlight(md-search){background:var(--mark);color:inherit}.results-head{padding:8px 10px;font-size:12px;color:var(--muted)}.crumb span{white-space:pre-wrap}.crumb a{color:var(--muted)}
 @media(max-width:1120px){.main{grid-template-columns:minmax(0,1fr)}}
 
 </style></head><body>
@@ -352,7 +372,7 @@ const statusClass=s=>({'da fare':'todo','in corso':'doing','fatta':'done','blocc
 function statusBadge(s){return el('span','status-badge '+statusClass(s),s||'non specificato')}
 const byPath=new Map(pages.map((p,i)=>[p.path,{p,i}]));
 const sections=JSON.parse($('nav-data').textContent), links=new Map(), trails=new Map(), ordered=[];
-function drawNode(node,trail){const li=el('li',node.open?'expanded':'');const row=el('div','navrow');const kids=node.children?.length;const toggle=el(kids?'button':'span','navtoggle',kids?'›':'');if(kids){toggle.type='button';toggle.setAttribute('aria-label','Espandi o comprimi '+node.label);toggle.setAttribute('aria-expanded',String(!!node.open));toggle.onclick=()=>setOpen(li,!li.classList.contains('expanded'))}row.append(toggle);const p=node.page&&byPath.get(node.page)?.p;const a=p?makeLink(p,'',node.label,'navlink'):el('button','navlink',node.label);if(kids)a.classList.add('group');if(!p){a.type='button';a.onclick=()=>setOpen(li,!li.classList.contains('expanded'))}else{a.title=p.path;links.set(p.path,a);trails.set(p.path,trail.concat([{label:node.label,page:node.page}]));ordered.push(p);if(node.id){const id=el('span','navfeature '+statusClass(node.status),node.id);id.title=node.status||'';if(a.textContent.toUpperCase().startsWith(node.id.toUpperCase()))a.textContent=a.textContent.slice(node.id.length).replace(/^\s*[·:—–-]?\s*/, '');a.prepend(id)}else if(node.status)a.prepend(el('span','status-dot '+statusClass(node.status)))}row.append(a);li.append(row);if(kids){const ul=el('ul');for(const c of node.children)ul.append(drawNode(c,trail.concat([{label:node.label,page:node.page}])));li.append(ul)}return li}
+function drawNode(node,trail){const li=el('li',node.open?'expanded':'');const row=el('div','navrow');const kids=node.children?.length;const toggle=el(kids?'button':'span','navtoggle',kids?'›':'');if(kids){toggle.type='button';toggle.setAttribute('aria-label','Espandi o comprimi '+node.label);toggle.setAttribute('aria-expanded',String(!!node.open));toggle.onclick=()=>setOpen(li,!li.classList.contains('expanded'))}row.append(toggle);const p=node.page&&byPath.get(node.page)?.p;const a=p?makeLink(p,'',node.label,'navlink'):el('button','navlink',node.label);if(kids)a.classList.add('group');if(!p){a.type='button';a.onclick=()=>setOpen(li,!li.classList.contains('expanded'))}else{a.title=p.path;links.set(p.path,a);trails.set(p.path,trail.concat([{label:node.label,page:node.page}]));ordered.push(p);if(node.id){const id=el('span','navfeature '+statusClass(node.status));const m=/^(.+?-)(\d+)$/.exec(node.id);if(m)id.append(el('span','navfeature-code',m[1]),document.createTextNode(m[2]));else id.textContent=node.id;id.title=node.id+(node.status?' · '+node.status:'');if(a.textContent.toUpperCase().startsWith(node.id.toUpperCase()))a.textContent=a.textContent.slice(node.id.length).replace(/^\s*[·:—–-]?\s*/, '');a.prepend(id)}else if(node.status)a.prepend(el('span','status-dot '+statusClass(node.status)))}row.append(a);li.append(row);if(kids){const ul=el('ul');for(const c of node.children)ul.append(drawNode(c,trail.concat([{label:node.label,page:node.page}])));li.append(ul)}return li}
 function setOpen(li,on){li.classList.toggle('expanded',on);li.querySelector(':scope > .navrow > button.navtoggle')?.setAttribute('aria-expanded',String(on))}
 for(const section of sections){const box=el('section','navsection');box.append(el('div','navsection-title',section.label));const ul=el('ul');for(const n of section.children)ul.append(drawNode(n,[{label:section.label}]));box.append(ul);nav.append(box)}
 function reveal(p){for(const a of links.values()){a.classList.remove('active');a.removeAttribute('aria-current')}const a=links.get(p.path);if(!a)return;a.classList.add('active');a.setAttribute('aria-current','page');for(let n=a.closest('li');n;n=n.parentElement.closest('li')){if(n.querySelector(':scope > ul'))setOpen(n,true)}if(!nav.hidden){const pane=nav.parentElement,r=a.getBoundingClientRect(),b=pane.getBoundingClientRect();if(r.top<b.top||r.bottom>b.bottom)pane.scrollTop+=r.top-b.top-b.height/2}}

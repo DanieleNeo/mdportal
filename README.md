@@ -1,6 +1,6 @@
 # MD Portal — generatore Markdown → HTML
 
-Versione 4.3. Generatore generico in Python ispirato alla struttura del portale doc-pack: un unico HTML con pagine, indice ad albero, sommario per pagina, ricerca full-text, tema chiaro/scuro, stampa e copia del codice. Nessuna risorsa web necessaria per l'interfaccia.
+Versione 4.3.1. Generatore generico in Python ispirato alla struttura del portale doc-pack: un unico HTML con pagine, indice ad albero, sommario per pagina, ricerca full-text, tema chiaro/scuro, stampa e copia del codice. Nessuna risorsa web necessaria per l'interfaccia.
 
 ## Requisiti
 
@@ -253,3 +253,8 @@ L'indice destro evidenzia la sezione corrente durante lo scroll, usando requestA
 La ricerca costruisce l'indice al primo utilizzo. Ignora maiuscole e accenti, richiede tutti i termini, pondera titolo/percorso (30), intestazioni (8), frequenza nel testo (massimo 30 per termine) e frase esatta (15). Gli ID delle funzionalità e le user story presenti nelle intestazioni hanno priorità; sono ammessi anche ID abbreviati (es. `TKT-1`, `US-TKT-1-1`, `ticketing#TKT-1`). I primi 80 risultati mostrano un estratto evidenziato, e il conteggio totale rimane visibile. I risultati restano aperti durante la navigazione. Frecce su/giù, Invio, Esc, / e Ctrl+K sono supportati. Il testo nella pagina è evidenziato tramite CSS Custom Highlight API, quando disponibile nel browser; non vengono alterati formule, link o SVG. La ricerca rimane interamente offline e non aggiunge librerie JavaScript esterne. Nessun nuovo prerequisito.
 
 Verifica sulla struttura del documento doc-pack di riferimento: 554 voci (compresa la dashboard), tutte presenti una sola volta. Test di ricerca separato sui testi e metadati estratti dall'HTML originale: circa 3,84 MB di testo, 74,7 ms alla prima query (indicizzazione inclusa), circa 3–27 ms per le successive sei query nel browser di test, escluso il debounce di 120 ms. Non è un confronto cronometrico con doc-pack e non misura l'apertura di tutte le pagine originali. Test del portale generato eseguiti su Chromium Linux senza rete; apertura file:// bloccata da policy del laboratorio.
+
+## Aggiornamento 4.3.1
+
+- Badge ID delle feature nel menu laterale: font monospaziato, sfondo e bordo per stato, contrasto in entrambi i temi.
+- Risoluzione dei riferimenti inline Dataview semplici (es. `=this.name`, `=this.description`, `=this.version`) dal front matter YAML della pagina, prima di calcolare titoli, ancore e indice di ricerca. I valori scalari sono inseriti come testo, non HTML o codice. Le proprietà mancanti o non scalari sono lasciate visibili con un avviso (errore in modalità `--strict`). Non è un interprete Dataview: query, funzioni ed espressioni complesse non vengono eseguite. I blocchi di codice restano invariati. Il report include `inline_properties_resolved`.
